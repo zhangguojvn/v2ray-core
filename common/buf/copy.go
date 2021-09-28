@@ -95,6 +95,52 @@ func copyInternal(reader Reader, writer Writer, handler *copyHandler) error {
 	}
 }
 
+func copyInternalWriter(reader Reader, writer Writer, c chan (int), handler *copyHandler) error {
+	for {
+		buffer, err := reader.ReadMultiBuffer()
+		if !buffer.IsEmpty() {
+			select {
+
+			case c <- 1:
+
+			default:
+				return readError{newError("断流")}
+			}
+			for _, handler := range handler.onData {
+				handler(buffer)
+			}
+
+			if werr := writer.WriteMultiBuffer(buffer); werr != nil {
+				return writeError{werr}
+			}
+		}
+
+		if err != nil {
+			return readError{err}
+		}
+	}
+}
+
+func copyInternalReader(reader Reader, writer Writer, c chan (int), handler *copyHandler) error {
+	for {
+		buffer, err := reader.ReadMultiBuffer()
+		if !buffer.IsEmpty() {
+			cleanChan(c)
+			for _, handler := range handler.onData {
+				handler(buffer)
+			}
+
+			if werr := writer.WriteMultiBuffer(buffer); werr != nil {
+				return writeError{werr}
+			}
+		}
+
+		if err != nil {
+			return readError{err}
+		}
+	}
+}
+
 // Copy dumps all payload from reader to writer or stops when an error occurs. It returns nil when EOF.
 func Copy(reader Reader, writer Writer, options ...CopyOption) error {
 	var handler copyHandler
@@ -102,6 +148,30 @@ func Copy(reader Reader, writer Writer, options ...CopyOption) error {
 		option(&handler)
 	}
 	err := copyInternal(reader, writer, &handler)
+	if err != nil && errors.Cause(err) != io.EOF {
+		return err
+	}
+	return nil
+}
+
+func CopyWriter(reader Reader, writer Writer, c chan (int), options ...CopyOption) error {
+	var handler copyHandler
+	for _, option := range options {
+		option(&handler)
+	}
+	err := copyInternalWriter(reader, writer, c, &handler)
+	if err != nil && errors.Cause(err) != io.EOF {
+		return err
+	}
+	return nil
+}
+
+func CopyReader(reader Reader, writer Writer, c chan (int), options ...CopyOption) error {
+	var handler copyHandler
+	for _, option := range options {
+		option(&handler)
+	}
+	err := copyInternalReader(reader, writer, c, &handler)
 	if err != nil && errors.Cause(err) != io.EOF {
 		return err
 	}
@@ -120,4 +190,14 @@ func CopyOnceTimeout(reader Reader, writer Writer, timeout time.Duration) error 
 		return err
 	}
 	return writer.WriteMultiBuffer(mb)
+}
+
+func cleanChan(c chan (int)) {
+	for {
+		select {
+		case <-c:
+		default:
+			return
+		}
+	}
 }

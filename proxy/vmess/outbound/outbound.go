@@ -143,6 +143,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 	ctx, cancel := context.WithCancel(ctx)
 	timer := signal.CancelAfterInactivity(ctx, cancel, sessionPolicy.Timeouts.ConnectionIdle)
 
+	c := make(chan (int), 10)
 	requestDone := func() error {
 		defer timer.SetTimeout(sessionPolicy.Timeouts.DownlinkOnly)
 
@@ -160,7 +161,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 			return err
 		}
 
-		if err := buf.Copy(input, bodyWriter, buf.UpdateActivity(timer)); err != nil {
+		if err := buf.CopyWriter(input, bodyWriter, c, buf.UpdateActivity(timer)); err != nil {
 			return err
 		}
 
@@ -185,7 +186,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 
 		bodyReader := session.DecodeResponseBody(request, reader)
 
-		return buf.Copy(bodyReader, output, buf.UpdateActivity(timer))
+		return buf.CopyReader(bodyReader, output, c, buf.UpdateActivity(timer))
 	}
 
 	responseDonePost := task.OnSuccess(responseDone, task.Close(output))

@@ -114,6 +114,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 	clientReader := link.Reader // .(*pipe.Reader)
 	clientWriter := link.Writer // .(*pipe.Writer)
 
+	c := make(chan (int), 1000)
 	postRequest := func() error {
 		defer timer.SetTimeout(sessionPolicy.Timeouts.DownlinkOnly)
 
@@ -134,7 +135,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 		}
 
 		// from clientReader.ReadMultiBuffer to serverWriter.WriteMultiBufer
-		if err := buf.Copy(clientReader, serverWriter, buf.UpdateActivity(timer)); err != nil {
+		if err := buf.CopyWriter(clientReader, serverWriter, c, buf.UpdateActivity(timer)); err != nil {
 			return newError("failed to transfer request payload").Base(err).AtInfo()
 		}
 
@@ -153,7 +154,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 		serverReader := encoding.DecodeBodyAddons(conn, request, responseAddons)
 
 		// from serverReader.ReadMultiBuffer to clientWriter.WriteMultiBufer
-		if err := buf.Copy(serverReader, clientWriter, buf.UpdateActivity(timer)); err != nil {
+		if err := buf.CopyReader(serverReader, clientWriter, c, buf.UpdateActivity(timer)); err != nil {
 			return newError("failed to transfer response payload").Base(err).AtInfo()
 		}
 
